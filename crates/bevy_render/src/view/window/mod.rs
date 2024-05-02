@@ -296,7 +296,6 @@ pub fn prepare_windows(
         // application state.
         // see https://github.com/bevyengine/bevy/pull/5957
         // and https://github.com/gfx-rs/wgpu/issues/1218
-        #[cfg(target_os = "linux")]
         let may_erroneously_timeout = || {
             render_instance
                 .enumerate_adapters(wgpu::Backends::VULKAN)
