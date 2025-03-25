@@ -157,3 +157,25 @@ pub fn expire_completed_transitions(
         });
     }
 }
+
+#[cfg(test)]
+mod test {
+    use bevy_app::App;
+
+    use crate::{AnimationPlayer, AnimationPlugin};
+
+    use super::AnimationTransitions;
+
+    fn test_advance_transitions() {
+        let mut app = App::new();
+
+        app.add_plugins(AnimationPlugin);
+
+        let mut transitions = AnimationTransitions::new();
+        let mut player = AnimationPlayer::default();
+        // let mut player = transitions
+        //     .play(&mut player, animations.index, Duration::ZERO)
+        //     .repeat();
+        app.world_mut().spawn((transitions, player));
+    }
+}
