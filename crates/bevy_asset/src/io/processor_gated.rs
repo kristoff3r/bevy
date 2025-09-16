@@ -17,7 +17,7 @@ use super::{AsyncSeekForward, ErasedAssetReader};
 ///
 /// [`AssetProcessor`]: crate::processor::AssetProcessor
 pub struct ProcessorGatedReader {
-    reader: Box<dyn ErasedAssetReader>,
+    reader: Arc<dyn ErasedAssetReader>,
     source: AssetSourceId<'static>,
     processor_data: Arc<AssetProcessorData>,
 }
@@ -26,7 +26,7 @@ impl ProcessorGatedReader {
     /// Creates a new [`ProcessorGatedReader`].
     pub fn new(
         source: AssetSourceId<'static>,
-        reader: Box<dyn ErasedAssetReader>,
+        reader: Arc<dyn ErasedAssetReader>,
         processor_data: Arc<AssetProcessorData>,
     ) -> Self {
         Self {
@@ -139,16 +139,6 @@ impl AsyncRead for TransactionLockedReader<'_> {
         buf: &mut [u8],
     ) -> Poll<futures_io::Result<usize>> {
         Pin::new(&mut self.reader).poll_read(cx, buf)
-    }
-}
-
-impl AsyncSeekForward for TransactionLockedReader<'_> {
-    fn poll_seek_forward(
-        mut self: Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-        offset: u64,
-    ) -> Poll<std::io::Result<u64>> {
-        Pin::new(&mut self.reader).poll_seek_forward(cx, offset)
     }
 }
 

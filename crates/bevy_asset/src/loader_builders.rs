@@ -10,21 +10,6 @@ use crate::{
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc};
 use core::any::TypeId;
 
-// Utility type for handling the sources of reader references
-enum ReaderRef<'a> {
-    Borrowed(&'a mut dyn Reader),
-    Boxed(Box<dyn Reader + 'a>),
-}
-
-impl ReaderRef<'_> {
-    pub fn as_mut(&mut self) -> &mut dyn Reader {
-        match self {
-            ReaderRef::Borrowed(r) => &mut **r,
-            ReaderRef::Boxed(b) => &mut **b,
-        }
-    }
-}
-
 /// A builder for loading nested assets inside a [`LoadContext`].
 ///
 /// # Loader state
@@ -393,7 +378,7 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
         if path.label().is_some() {
             return Err(LoadDirectError::RequestedSubasset(path.clone()));
         }
-        let (mut meta, loader, mut reader) = if let Some(reader) = self.mode.reader {
+        let (loader, asset) = if let Some(reader) = self.mode.reader {
             let loader = if let Some(asset_type_id) = asset_type_id {
                 self.load_context
                     .asset_server
@@ -413,10 +398,19 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
                         error: error.into(),
                     })?
             };
-            let meta = loader.default_meta();
-            (meta, loader, ReaderRef::Borrowed(reader))
+            let mut meta = loader.default_meta();
+
+            if let Some(meta_transform) = self.meta_transform {
+                meta_transform(&mut *meta);
+            }
+            let asset = self
+                .load_context
+                .load_direct_internal(path.clone(), meta.as_ref(), &*loader, &mut *reader)
+                .await?;
+
+            (loader, asset)
         } else {
-            let (meta, loader, reader) = self
+            let (mut meta, loader, reader) = self
                 .load_context
                 .asset_server
                 .get_meta_loader_and_reader(path, asset_type_id)
@@ -425,17 +419,22 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
                     dependency: path.clone(),
                     error,
                 })?;
-            (meta, loader, ReaderRef::Boxed(reader))
+            if let Some(meta_transform) = self.meta_transform {
+                meta_transform(&mut *meta);
+            }
+            let asset = self
+                .load_context
+                .load_direct_internal(
+                    path.clone(),
+                    meta.as_ref(),
+                    &*loader,
+                    &mut reader.read(path.path()).await.unwrap(),
+                )
+                .await?;
+
+            (loader, asset)
         };
 
-        if let Some(meta_transform) = self.meta_transform {
-            meta_transform(&mut *meta);
-        }
-
-        let asset = self
-            .load_context
-            .load_direct_internal(path.clone(), meta.as_ref(), &*loader, reader.as_mut())
-            .await?;
         Ok((loader, asset))
     }
 }

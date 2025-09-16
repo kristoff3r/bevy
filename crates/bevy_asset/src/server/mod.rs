@@ -4,9 +4,9 @@ mod loaders;
 use crate::{
     folder::LoadedFolder,
     io::{
-        AssetReaderError, AssetSource, AssetSourceEvent, AssetSourceId, AssetSources,
-        AssetWriterError, ErasedAssetReader, MissingAssetSourceError, MissingAssetWriterError,
-        MissingProcessedAssetReaderError, Reader,
+        AssetReaderError, AssetSource, AssetSourceBuilder, AssetSourceEvent, AssetSourceId,
+        AssetSources, AssetWriterError, ErasedAssetReader, MissingAssetSourceError,
+        MissingAssetWriterError, MissingProcessedAssetReaderError, Reader,
     },
     loader::{AssetLoader, ErasedAssetLoader, LoadContext, LoadedAsset},
     meta::{
@@ -65,7 +65,7 @@ pub(crate) struct AssetServerData {
     pub(crate) loaders: Arc<RwLock<AssetLoaders>>,
     asset_event_sender: Sender<InternalAssetEvent>,
     asset_event_receiver: Receiver<InternalAssetEvent>,
-    sources: AssetSources,
+    pub(crate) sources: Arc<RwLock<AssetSources>>,
     mode: AssetServerMode,
     meta_check: AssetMetaCheck,
     unapproved_path_mode: UnapprovedPathMode,
@@ -131,7 +131,7 @@ impl AssetServer {
         infos.watching_for_changes = watching_for_changes;
         Self {
             data: Arc::new(AssetServerData {
-                sources,
+                sources: Arc::new(RwLock::new(sources)),
                 mode,
                 meta_check,
                 asset_event_sender,
@@ -147,8 +147,8 @@ impl AssetServer {
     pub fn get_source<'a>(
         &self,
         source: impl Into<AssetSourceId<'a>>,
-    ) -> Result<&AssetSource, MissingAssetSourceError> {
-        self.data.sources.get(source.into())
+    ) -> Result<Arc<AssetSource>, MissingAssetSourceError> {
+        self.data.sources.read().get(source.into())
     }
 
     /// Returns true if the [`AssetServer`] watches for changes.
@@ -662,7 +662,7 @@ impl AssetServer {
 
         let path = path.into_owned();
         let path_clone = path.clone();
-        let (mut meta, loader, mut reader) = self
+        let (mut meta, loader, asset_reader) = self
             .get_meta_loader_and_reader(&path_clone, input_handle_type_id)
             .await
             .inspect_err(|e| {
@@ -771,7 +771,7 @@ impl AssetServer {
                 &base_path,
                 meta.as_ref(),
                 &*loader,
-                &mut *reader,
+                &mut asset_reader.read(path.clone().path()).await?,
                 true,
                 false,
             )
@@ -1050,7 +1050,7 @@ impl AssetServer {
                 };
 
                 let mut handles = Vec::new();
-                match load_folder(source.id(), path.path(), asset_reader, &server, &mut handles).await {
+                match load_folder(source.id(), path.path(), asset_reader.as_ref(), &server, &mut handles).await {
                     Ok(_) => server.send_asset_event(InternalAssetEvent::Loaded {
                         id,
                         loaded_asset: LoadedAsset::new_with_dependencies(
@@ -1330,15 +1330,15 @@ impl AssetServer {
             .0
     }
 
-    pub(crate) async fn get_meta_loader_and_reader<'a>(
-        &'a self,
-        asset_path: &'a AssetPath<'_>,
+    pub(crate) async fn get_meta_loader_and_reader(
+        &self,
+        asset_path: &AssetPath<'_>,
         asset_type_id: Option<TypeId>,
     ) -> Result<
         (
             Box<dyn AssetMetaDyn>,
             Arc<dyn ErasedAssetLoader>,
-            Box<dyn Reader + 'a>,
+            Arc<dyn ErasedAssetReader>,
         ),
         AssetLoadError,
     > {
@@ -1351,7 +1351,6 @@ impl AssetServer {
             AssetServerMode::Unprocessed => source.reader(),
             AssetServerMode::Processed => source.processed_reader()?,
         };
-        let reader = asset_reader.read(asset_path.path()).await?;
         let read_meta = match &self.data.meta_check {
             AssetMetaCheck::Always => true,
             AssetMetaCheck::Paths(paths) => paths.contains(asset_path),
@@ -1390,7 +1389,7 @@ impl AssetServer {
                         }
                     })?;
 
-                    Ok((meta, loader, reader))
+                    Ok((meta, loader, asset_reader))
                 }
                 Err(AssetReaderError::NotFound(_)) => {
                     // TODO: Handle error transformation
@@ -1411,7 +1410,7 @@ impl AssetServer {
                     let loader = loader.ok_or_else(error)?.get().await.map_err(|_| error())?;
 
                     let meta = loader.default_meta();
-                    Ok((meta, loader, reader))
+                    Ok((meta, loader, asset_reader))
                 }
                 Err(err) => Err(err.into()),
             }
@@ -1433,7 +1432,7 @@ impl AssetServer {
             let loader = loader.ok_or_else(error)?.get().await.map_err(|_| error())?;
 
             let meta = loader.default_meta();
-            Ok((meta, loader, reader))
+            Ok((meta, loader, asset_reader))
         }
     }
 
@@ -1739,7 +1738,7 @@ pub fn handle_internal_asset_events(world: &mut World) {
             }
         };
 
-        for source in server.data.sources.iter() {
+        for source in server.data.sources.read().iter() {
             match server.data.mode {
                 AssetServerMode::Unprocessed => {
                     if let Some(receiver) = source.event_receiver() {

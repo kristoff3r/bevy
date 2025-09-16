@@ -1895,7 +1895,7 @@ struct MorphTargetNames {
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
 
     use crate::{Gltf, GltfAssetLabel, GltfNode, GltfSkin};
     use bevy_app::{App, TaskPoolPlugin};
@@ -1917,7 +1917,7 @@ mod test {
         let reader = MemoryAssetReader { root: dir };
         app.register_asset_source(
             AssetSourceId::Default,
-            AssetSource::build().with_reader(move || Box::new(reader.clone())),
+            AssetSource::build().with_reader(move || Arc::new(reader.clone())),
         )
         .add_plugins((
             LogPlugin::default(),

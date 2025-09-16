@@ -208,7 +208,10 @@ pub use ron;
 pub use uuid;
 
 use crate::{
-    io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},
+    io::{
+        embedded::EmbeddedAssetRegistry, rebuild_asset_sources, AssetSourceBuilder,
+        AssetSourceBuilders, AssetSourceId,
+    },
     processor::{AssetProcessor, Process},
 };
 use alloc::{
@@ -226,7 +229,6 @@ use bevy_ecs::{
 use bevy_platform::collections::HashSet;
 use bevy_reflect::{FromReflect, GetTypeRegistration, Reflect, TypePath};
 use core::any::TypeId;
-use tracing::error;
 
 /// Provides "asset" loading and processing functionality. An [`Asset`] is a "runtime value" that is loaded from an [`AssetSource`],
 /// which can be something like a filesystem, a network, etc.
@@ -424,7 +426,8 @@ impl Plugin for AssetPlugin {
             // and as a result has ambiguous system ordering with all other systems in `PreUpdate`.
             // This is virtually never a real problem: asset loading is async and so anything that interacts directly with it
             // needs to be robust to stochastic delays anyways.
-            .add_systems(PreUpdate, handle_internal_asset_events.ambiguous_with_all());
+            .add_systems(PreUpdate, handle_internal_asset_events.ambiguous_with_all())
+            .add_systems(PreUpdate, rebuild_asset_sources);
     }
 }
 
@@ -595,9 +598,6 @@ impl AssetApp for App {
         source: AssetSourceBuilder,
     ) -> &mut Self {
         let id = id.into();
-        if self.world().get_resource::<AssetServer>().is_some() {
-            error!("{} must be registered before `AssetPlugin` (typically added as part of `DefaultPlugins`)", id);
-        }
 
         {
             let mut sources = self
@@ -893,7 +893,7 @@ mod tests {
         let (gated_memory_reader, gate_opener) = GatedReader::new(MemoryAssetReader { root: dir });
         app.register_asset_source(
             AssetSourceId::Default,
-            AssetSource::build().with_reader(move || Box::new(gated_memory_reader.clone())),
+            AssetSource::build().with_reader(move || Arc::new(gated_memory_reader.clone())),
         )
         .add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
         (app, gate_opener)
@@ -1771,7 +1771,7 @@ mod tests {
         let mut app = App::new();
         app.register_asset_source(
             "unstable",
-            AssetSource::build().with_reader(move || Box::new(unstable_reader.clone())),
+            AssetSource::build().with_reader(move || Arc::new(unstable_reader.clone())),
         )
         .add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_asset::<CoolText>()
@@ -1842,7 +1842,7 @@ mod tests {
         app.register_asset_source(
             AssetSourceId::Default,
             AssetSource::build()
-                .with_reader(move || Box::new(MemoryAssetReader { root: dir.clone() })),
+                .with_reader(move || Arc::new(MemoryAssetReader { root: dir.clone() })),
         )
         .add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
 
@@ -1965,7 +1965,7 @@ mod tests {
         let memory_reader = MemoryAssetReader { root: dir };
         app.register_asset_source(
             AssetSourceId::Default,
-            AssetSource::build().with_reader(move || Box::new(memory_reader.clone())),
+            AssetSource::build().with_reader(move || Arc::new(memory_reader.clone())),
         )
         .add_plugins((
             TaskPoolPlugin::default(),

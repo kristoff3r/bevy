@@ -9,10 +9,10 @@ use bevy::{
     },
     prelude::*,
 };
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 /// A custom asset reader implementation that wraps a given asset reader implementation
-struct CustomAssetReader(Box<dyn ErasedAssetReader>);
+struct CustomAssetReader(Arc<dyn ErasedAssetReader>);
 
 impl AssetReader for CustomAssetReader {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {

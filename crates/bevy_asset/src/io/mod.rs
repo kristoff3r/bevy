@@ -22,6 +22,7 @@ pub mod gated;
 
 mod source;
 
+use futures_lite::io::Take;
 pub use futures_lite::AsyncWriteExt;
 pub use source::*;
 
@@ -124,6 +125,26 @@ impl<T: ?Sized + AsyncSeekForward + Unpin> AsyncSeekForward for Box<T> {
     }
 }
 
+impl<T: ?Sized + AsyncSeekForward + Unpin> AsyncSeekForward for &mut T {
+    fn poll_seek_forward(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        offset: u64,
+    ) -> Poll<futures_io::Result<u64>> {
+        Pin::new(&mut **self).poll_seek_forward(cx, offset)
+    }
+}
+
+// impl<T: AsyncSeekForward + Unpin> AsyncSeekForward for Take<T> {
+//     fn poll_seek_forward(
+//         mut self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//         offset: u64,
+//     ) -> Poll<futures_io::Result<u64>> {
+//         Pin::new((*self).get_mut()).poll_seek_forward(cx, offset)
+//     }
+// }
+
 /// Extension trait for [`AsyncSeekForward`].
 pub trait AsyncSeekForwardExt: AsyncSeekForward {
     /// Seek by the provided `offset` in the forwards direction, using the [`AsyncSeekForward`] trait.
@@ -164,7 +185,7 @@ impl<S: AsyncSeekForward + Unpin + ?Sized> Future for SeekForwardFuture<'_, S> {
 /// This is essentially a trait alias for types implementing [`AsyncRead`] and [`AsyncSeekForward`].
 /// The only reason a blanket implementation is not provided for applicable types is to allow
 /// implementors to override the provided implementation of [`Reader::read_to_end`].
-pub trait Reader: AsyncRead + AsyncSeekForward + Unpin + Send + Sync {
+pub trait Reader: AsyncRead + Unpin + Send + Sync {
     /// Reads the entire contents of this reader and appends them to a vec.
     ///
     /// # Note for implementors

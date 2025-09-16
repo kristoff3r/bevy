@@ -44,6 +44,7 @@ pub use log::*;
 pub use process::*;
 
 use crate::{
+    handle,
     io::{
         AssetReaderError, AssetSource, AssetSourceBuilders, AssetSourceEvent, AssetSourceId,
         AssetSources, AssetWriterError, ErasedAssetReader, ErasedAssetWriter,
@@ -59,9 +60,9 @@ use crate::{
 use alloc::{borrow::ToOwned, boxed::Box, collections::VecDeque, sync::Arc, vec, vec::Vec};
 use bevy_ecs::prelude::*;
 use bevy_platform::collections::{HashMap, HashSet};
-use bevy_tasks::IoTaskPool;
+use bevy_tasks::{BoxedFuture, IoTaskPool};
 use futures_io::ErrorKind;
-use futures_lite::{AsyncReadExt, AsyncWriteExt, StreamExt};
+use futures_lite::{AsyncReadExt, AsyncWriteExt, FutureExt, StreamExt};
 use parking_lot::RwLock;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -115,8 +116,8 @@ impl AssetProcessor {
     pub fn new(source: &mut AssetSourceBuilders) -> Self {
         let data = Arc::new(AssetProcessorData::new(source.build_sources(true, false)));
         // The asset processor uses its own asset server with its own id space
-        let mut sources = source.build_sources(false, false);
-        sources.gate_on_processor(data.clone());
+        source.gate_on_processor(data.clone());
+        let sources = source.build_sources(false, false);
         let server = AssetServer::new_with_meta_check(
             sources,
             AssetServerMode::Processed,
@@ -159,8 +160,8 @@ impl AssetProcessor {
     pub fn get_source<'a>(
         &self,
         id: impl Into<AssetSourceId<'a>>,
-    ) -> Result<&AssetSource, MissingAssetSourceError> {
-        self.data.sources.get(id.into())
+    ) -> Result<Arc<AssetSource>, MissingAssetSourceError> {
+        self.data.sources.get(id.into()).clone()
     }
 
     #[inline]
@@ -568,7 +569,7 @@ impl AssetProcessor {
                     let processor = self.clone();
                     let source = self.get_source(path.source()).unwrap();
                     scope.spawn(async move {
-                        processor.process_asset(source, path.into()).await;
+                        processor.process_asset(source.as_ref(), path.into()).await;
                     });
                 }
             });
@@ -665,7 +666,7 @@ impl AssetProcessor {
             };
             let mut unprocessed_paths = Vec::new();
             get_asset_paths(
-                source.reader(),
+                source.reader().as_ref(),
                 None,
                 PathBuf::from(""),
                 &mut unprocessed_paths,
@@ -675,7 +676,7 @@ impl AssetProcessor {
 
             let mut processed_paths = Vec::new();
             get_asset_paths(
-                processed_reader,
+                processed_reader.as_ref(),
                 Some(processed_writer),
                 PathBuf::from(""),
                 &mut processed_paths,

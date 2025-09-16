@@ -9,10 +9,12 @@ use crate::io::{
     AssetSource, AssetSourceBuilders,
 };
 use crate::AssetServer;
-use alloc::boxed::Box;
 use bevy_app::App;
 use bevy_ecs::{resource::Resource, world::World};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[cfg(feature = "embedded_watcher")]
 use alloc::borrow::ToOwned;
@@ -94,9 +96,9 @@ impl EmbeddedAssetRegistry {
             )
         )]
         let mut source = AssetSource::build()
-            .with_reader(move || Box::new(MemoryAssetReader { root: dir.clone() }))
+            .with_reader(move || Arc::new(MemoryAssetReader { root: dir.clone() }))
             .with_processed_reader(move || {
-                Box::new(MemoryAssetReader {
+                Arc::new(MemoryAssetReader {
                     root: processed_dir.clone(),
                 })
             })
