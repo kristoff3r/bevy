@@ -305,6 +305,15 @@ pub async fn initialize_renderer(
         }
 
         limits = adapter.limits();
+
+        // Attempted workaround for a wgpu bug on DX12: `max_binding_array_sampler_elements_per_shader_stage`
+        // is incorrectly set to the CBV/SRV/UAV descriptor heap size instead of the sampler
+        // descriptor heap size.
+        if adapter_info.backend == wgpu::Backend::Dx12 {
+            limits.max_binding_array_sampler_elements_per_shader_stage = limits
+                .max_binding_array_sampler_elements_per_shader_stage
+                .min(limits.max_samplers_per_shader_stage);
+        }
     }
 
     // Enforce the disabled features
